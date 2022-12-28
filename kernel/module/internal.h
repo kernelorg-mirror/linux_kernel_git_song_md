@@ -22,22 +22,17 @@
 /* Maximum number of characters written by module_flags() */
 #define MODULE_FLAGS_BUF_SIZE (TAINT_FLAGS_COUNT + 4)
 
-#ifndef CONFIG_ARCH_WANTS_MODULES_DATA_IN_VMALLOC
-#define	data_layout core_layout
-#endif
+#define for_each_mod_mem_type(type)	\
+	for ((type) = MOD_MEM_TYPE_TEXT;	\
+	     (type) < MOD_MEM_NUM_TYPES; (type)++)
 
-/*
- * Modules' sections will be aligned on page boundaries
- * to ensure complete separation of code and data, but
- * only when CONFIG_STRICT_MODULE_RWX=y
- */
-static inline unsigned int strict_align(unsigned int size)
-{
-	if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX))
-		return PAGE_ALIGN(size);
-	else
-		return size;
-}
+#define for_core_mod_mem_type(type)		\
+	for ((type) = MOD_MEM_TYPE_TEXT;		\
+	     (type) < MOD_MEM_TYPE_INIT_TEXT; (type)++)
+
+#define for_init_mod_mem_type(type)		\
+	for ((type) = MOD_MEM_TYPE_INIT_TEXT;		\
+	     (type) < MOD_MEM_NUM_TYPES; (type)++)
 
 extern struct mutex module_mutex;
 extern struct list_head modules;
@@ -101,8 +96,8 @@ int try_to_force_load(struct module *mod, const char *reason);
 bool find_symbol(struct find_symbol_arg *fsa);
 struct module *find_module_all(const char *name, size_t len, bool even_unformed);
 int cmp_name(const void *name, const void *sym);
-long module_get_offset(struct module *mod, unsigned int *size, Elf_Shdr *sechdr,
-		       unsigned int section);
+long module_get_offset_and_type(struct module *mod, enum mod_mem_type type,
+				Elf_Shdr *sechdr, unsigned int section);
 char *module_flags(struct module *mod, char *buf, bool show_state);
 size_t module_flags_taint(unsigned long taints, char *buf);
 
@@ -190,10 +185,13 @@ struct mod_tree_root {
 #endif
 	unsigned long addr_min;
 	unsigned long addr_max;
+#ifdef CONFIG_ARCH_WANTS_MODULES_DATA_IN_VMALLOC
+	unsigned long data_addr_min;
+	unsigned long data_addr_max;
+#endif
 };
 
 extern struct mod_tree_root mod_tree;
-extern struct mod_tree_root mod_data_tree;
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 void mod_tree_insert(struct module *mod);

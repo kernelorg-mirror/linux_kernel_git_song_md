@@ -67,7 +67,7 @@ static bool plt_entries_equal(const struct plt_entry *a,
 
 static bool in_init(const struct module *mod, void *loc)
 {
-	return (u64)loc - (u64)mod->init_layout.base < mod->init_layout.size;
+	return (u64)loc - (u64)mod->mod_core_text.base < mod->mod_core_text.size;
 }
 
 u64 module_emit_plt_entry(struct module *mod, Elf64_Shdr *sechdrs,

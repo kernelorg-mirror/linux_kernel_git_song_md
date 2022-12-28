@@ -27,9 +27,9 @@
  *      We are not doing SEGREL32 handling correctly. According to the ABI, we
  *      should do a value offset, like this:
  *			if (in_init(me, (void *)val))
- *				val -= (uint32_t)me->init_layout.base;
+ *				val -= (uint32_t)me->mod_init_text.base;
  *			else
- *				val -= (uint32_t)me->core_layout.base;
+ *				val -= (uint32_t)me->mod_core_text.base;
  *	However, SEGREL32 is used only for PARISC unwind entries, and we want
  *	those entries to have an absolute address, and not just an offset.
  *
@@ -76,23 +76,18 @@
  * allows us to allocate up to 4095 GOT entries. */
 #define MAX_GOTS	4095
 
-/* three functions to determine where in the module core
- * or init pieces the location is */
-static inline int in_init(struct module *me, void *loc)
+static inline bool in_local(struct module *me, void *loc)
 {
-	return (loc >= me->init_layout.base &&
-		loc <= (me->init_layout.base + me->init_layout.size));
-}
+	enum mod_mem_type type;
 
-static inline int in_core(struct module *me, void *loc)
-{
-	return (loc >= me->core_layout.base &&
-		loc <= (me->core_layout.base + me->core_layout.size));
-}
+	for (type = MOD_MEM_TYPE_TEXT; type < MOD_MEM_NUM_TYPES; type++) {
+		struct module_memory *mod_mem = &me->mod_mem[type];
 
-static inline int in_local(struct module *me, void *loc)
-{
-	return in_init(me, loc) || in_core(me, loc);
+		if (loc >= mod_mem->base &&
+		    loc <= (mod_mem->base + mod_mem->size))
+			return true;
+	}
+	return false;
 }
 
 #ifndef CONFIG_64BIT
@@ -347,13 +342,13 @@ int module_frob_arch_sections(CONST Elf_Ehdr *hdr,
 	}
 
 	/* align things a bit */
-	me->core_layout.size = ALIGN(me->core_layout.size, 16);
-	me->arch.got_offset = me->core_layout.size;
-	me->core_layout.size += gots * sizeof(struct got_entry);
+	me->mod_core_text.size = ALIGN(me->mod_core_text.size, 16);
+	me->arch.got_offset = me->mod_core_text.size;
+	me->mod_core_text.size += gots * sizeof(struct got_entry);
 
-	me->core_layout.size = ALIGN(me->core_layout.size, 16);
-	me->arch.fdesc_offset = me->core_layout.size;
-	me->core_layout.size += fdescs * sizeof(Elf_Fdesc);
+	me->mod_core_text.size = ALIGN(me->mod_core_text.size, 16);
+	me->arch.fdesc_offset = me->mod_core_text.size;
+	me->mod_core_text.size += fdescs * sizeof(Elf_Fdesc);
 
 	me->arch.got_max = gots;
 	me->arch.fdesc_max = fdescs;
@@ -371,7 +366,7 @@ static Elf64_Word get_got(struct module *me, unsigned long value, long addend)
 
 	BUG_ON(value == 0);
 
-	got = me->core_layout.base + me->arch.got_offset;
+	got = me->mod_core_text.base + me->arch.got_offset;
 	for (i = 0; got[i].addr; i++)
 		if (got[i].addr == value)
 			goto out;
@@ -389,7 +384,7 @@ static Elf64_Word get_got(struct module *me, unsigned long value, long addend)
 #ifdef CONFIG_64BIT
 static Elf_Addr get_fdesc(struct module *me, unsigned long value)
 {
-	Elf_Fdesc *fdesc = me->core_layout.base + me->arch.fdesc_offset;
+	Elf_Fdesc *fdesc = me->mod_core_text.base + me->arch.fdesc_offset;
 
 	if (!value) {
 		printk(KERN_ERR "%s: zero OPD requested!\n", me->name);
@@ -407,7 +402,7 @@ static Elf_Addr get_fdesc(struct module *me, unsigned long value)
 
 	/* Create new one */
 	fdesc->addr = value;
-	fdesc->gp = (Elf_Addr)me->core_layout.base + me->arch.got_offset;
+	fdesc->gp = (Elf_Addr)me->mod_core_text.base + me->arch.got_offset;
 	return (Elf_Addr)fdesc;
 }
 #endif /* CONFIG_64BIT */
@@ -839,7 +834,7 @@ register_unwind_table(struct module *me,
 
 	table = (unsigned char *)sechdrs[me->arch.unwind_section].sh_addr;
 	end = table + sechdrs[me->arch.unwind_section].sh_size;
-	gp = (Elf_Addr)me->core_layout.base + me->arch.got_offset;
+	gp = (Elf_Addr)me->mod_core_text.base + me->arch.got_offset;
 
 	pr_debug("register_unwind_table(), sect = %d at 0x%p - 0x%p (gp=0x%lx)\n",
 	       me->arch.unwind_section, table, end, gp);
@@ -977,7 +972,7 @@ void module_arch_cleanup(struct module *mod)
 #ifdef CONFIG_64BIT
 void *dereference_module_function_descriptor(struct module *mod, void *ptr)
 {
-	unsigned long start_opd = (Elf64_Addr)mod->core_layout.base +
+	unsigned long start_opd = (Elf64_Addr)mod->mod_core_text.base +
 				   mod->arch.fdesc_offset;
 	unsigned long end_opd = start_opd +
 				mod->arch.fdesc_count * sizeof(Elf64_Fdesc);

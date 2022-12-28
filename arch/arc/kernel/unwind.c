@@ -378,8 +378,8 @@ void *unwind_add_table(struct module *module, const void *table_start,
 		return NULL;
 
 	init_unwind_table(table, module->name,
-			  module->core_layout.base, module->core_layout.size,
-			  module->init_layout.base, module->init_layout.size,
+			  module->mod_core_text.base, module->mod_core_text.size,
+			  module->mod_init_text.base, module->mod_init_text.size,
 			  table_start, table_size,
 			  NULL, 0);
 

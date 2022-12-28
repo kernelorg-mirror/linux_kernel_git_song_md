@@ -116,8 +116,8 @@ void layout_symtab(struct module *mod, struct load_info *info)
 
 	/* Put symbol section at end of init part of module. */
 	symsect->sh_flags |= SHF_ALLOC;
-	symsect->sh_entsize = module_get_offset(mod, &mod->init_layout.size, symsect,
-						info->index.sym) | INIT_OFFSET_MASK;
+	symsect->sh_entsize = module_get_offset_and_type(mod, MOD_MEM_TYPE_INIT_DATA,
+							 symsect, info->index.sym);
 	pr_debug("\t%s\n", info->secstrings + symsect->sh_name);
 
 	src = (void *)info->hdr + symsect->sh_offset;
@@ -134,28 +134,27 @@ void layout_symtab(struct module *mod, struct load_info *info)
 	}
 
 	/* Append room for core symbols at end of core part. */
-	info->symoffs = ALIGN(mod->data_layout.size, symsect->sh_addralign ?: 1);
-	info->stroffs = mod->data_layout.size = info->symoffs + ndst * sizeof(Elf_Sym);
-	mod->data_layout.size += strtab_size;
+	info->symoffs = ALIGN(mod->mod_core_data.size, symsect->sh_addralign ?: 1);
+	info->stroffs = mod->mod_core_data.size = info->symoffs + ndst * sizeof(Elf_Sym);
+	mod->mod_core_data.size += strtab_size;
 	/* Note add_kallsyms() computes strtab_size as core_typeoffs - stroffs */
-	info->core_typeoffs = mod->data_layout.size;
-	mod->data_layout.size += ndst * sizeof(char);
-	mod->data_layout.size = strict_align(mod->data_layout.size);
+	info->core_typeoffs = mod->mod_core_data.size;
+	mod->mod_core_data.size += ndst * sizeof(char);
 
 	/* Put string table section at end of init part of module. */
 	strsect->sh_flags |= SHF_ALLOC;
-	strsect->sh_entsize = module_get_offset(mod, &mod->init_layout.size, strsect,
-						info->index.str) | INIT_OFFSET_MASK;
+	strsect->sh_entsize = module_get_offset_and_type(mod, MOD_MEM_TYPE_INIT_DATA,
+							 strsect, info->index.str);
 	pr_debug("\t%s\n", info->secstrings + strsect->sh_name);
 
 	/* We'll tack temporary mod_kallsyms on the end. */
-	mod->init_layout.size = ALIGN(mod->init_layout.size,
-				      __alignof__(struct mod_kallsyms));
-	info->mod_kallsyms_init_off = mod->init_layout.size;
-	mod->init_layout.size += sizeof(struct mod_kallsyms);
-	info->init_typeoffs = mod->init_layout.size;
-	mod->init_layout.size += nsrc * sizeof(char);
-	mod->init_layout.size = strict_align(mod->init_layout.size);
+	mod->mod_init_data.size = ALIGN(mod->mod_init_data.size,
+					__alignof__(struct mod_kallsyms));
+	info->mod_kallsyms_init_off = mod->mod_init_data.size;
+
+	mod->mod_init_data.size += sizeof(struct mod_kallsyms);
+	info->init_typeoffs = mod->mod_init_data.size;
+	mod->mod_init_data.size += nsrc * sizeof(char);
 }
 
 /*
@@ -173,7 +172,7 @@ void add_kallsyms(struct module *mod, const struct load_info *info)
 	unsigned long strtab_size;
 
 	/* Set up to point into init section. */
-	mod->kallsyms = (void __rcu *)mod->init_layout.base +
+	mod->kallsyms = (void __rcu *)mod->mod_init_data.base +
 		info->mod_kallsyms_init_off;
 
 	rcu_read_lock();
@@ -183,15 +182,15 @@ void add_kallsyms(struct module *mod, const struct load_info *info)
 	/* Make sure we get permanent strtab: don't use info->strtab. */
 	rcu_dereference(mod->kallsyms)->strtab =
 		(void *)info->sechdrs[info->index.str].sh_addr;
-	rcu_dereference(mod->kallsyms)->typetab = mod->init_layout.base + info->init_typeoffs;
+	rcu_dereference(mod->kallsyms)->typetab = mod->mod_init_data.base + info->init_typeoffs;
 
 	/*
 	 * Now populate the cut down core kallsyms for after init
 	 * and set types up while we still have access to sections.
 	 */
-	mod->core_kallsyms.symtab = dst = mod->data_layout.base + info->symoffs;
-	mod->core_kallsyms.strtab = s = mod->data_layout.base + info->stroffs;
-	mod->core_kallsyms.typetab = mod->data_layout.base + info->core_typeoffs;
+	mod->core_kallsyms.symtab = dst = mod->mod_core_data.base + info->symoffs;
+	mod->core_kallsyms.strtab = s = mod->mod_core_data.base + info->stroffs;
+	mod->core_kallsyms.typetab = mod->mod_core_data.base + info->core_typeoffs;
 	strtab_size = info->core_typeoffs - info->stroffs;
 	src = rcu_dereference(mod->kallsyms)->symtab;
 	for (ndst = i = 0; i < rcu_dereference(mod->kallsyms)->num_symtab; i++) {
@@ -270,9 +269,9 @@ static const char *find_kallsyms_symbol(struct module *mod,
 
 	/* At worse, next value is at end of module */
 	if (within_module_init(addr, mod))
-		nextval = (unsigned long)mod->init_layout.base + mod->init_layout.text_size;
+		nextval = (unsigned long)mod->mod_init_text.base + mod->mod_init_text.size;
 	else
-		nextval = (unsigned long)mod->core_layout.base + mod->core_layout.text_size;
+		nextval = (unsigned long)mod->mod_core_text.base + mod->mod_core_text.size;
 
 	bestval = kallsyms_symbol_value(&kallsyms->symtab[best]);
 

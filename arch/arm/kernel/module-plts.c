@@ -30,7 +30,7 @@ static const u32 fixed_plts[] = {
 
 static bool in_init(const struct module *mod, unsigned long loc)
 {
-	return loc - (u32)mod->init_layout.base < mod->init_layout.size;
+	return loc - (u32)mod->mod_init_text.base < mod->mod_init_text.size;
 }
 
 static void prealloc_fixed(struct mod_plt_sec *pltsec, struct plt_entries *plt)
