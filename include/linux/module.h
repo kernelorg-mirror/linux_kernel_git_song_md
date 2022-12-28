@@ -320,17 +320,22 @@ struct mod_tree_node {
 	struct latch_tree_node node;
 };
 
-struct module_layout {
-	/* The actual code + data. */
+enum mod_mem_type {
+	MOD_MEM_TYPE_TEXT,
+	MOD_MEM_TYPE_DATA,
+	MOD_MEM_TYPE_RODATA,
+	MOD_MEM_TYPE_RO_AFTER_INIT,
+	MOD_MEM_TYPE_INIT_TEXT,
+	MOD_MEM_TYPE_INIT_DATA,
+	MOD_MEM_TYPE_INIT_RODATA,
+
+	MOD_MEM_NUM_TYPES,
+	MOD_MEM_TYPE_INVALID = -1,
+};
+
+struct module_memory {
 	void *base;
-	/* Total size. */
 	unsigned int size;
-	/* The size of the executable code.  */
-	unsigned int text_size;
-	/* Size of RO section of the module (text+rodata) */
-	unsigned int ro_size;
-	/* Size of RO after init section */
-	unsigned int ro_after_init_size;
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 	struct mod_tree_node mtn;
@@ -339,9 +344,9 @@ struct module_layout {
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 /* Only touch one cacheline for common rbtree-for-core-layout case. */
-#define __module_layout_align ____cacheline_aligned
+#define __module_memory_align ____cacheline_aligned
 #else
-#define __module_layout_align
+#define __module_memory_align
 #endif
 
 struct mod_kallsyms {
@@ -418,12 +423,8 @@ struct module {
 	/* Startup function. */
 	int (*init)(void);
 
-	/* Core layout: rbtree is accessed frequently, so keep together. */
-	struct module_layout core_layout __module_layout_align;
-	struct module_layout init_layout;
-#ifdef CONFIG_ARCH_WANTS_MODULES_DATA_IN_VMALLOC
-	struct module_layout data_layout;
-#endif
+	/* rbtree is accessed frequently, so keep together. */
+	struct module_memory mod_mem[MOD_MEM_NUM_TYPES] __module_memory_align;
 
 	/* Arch-specific module values */
 	struct mod_arch_specific arch;
@@ -573,23 +574,35 @@ bool __is_module_percpu_address(unsigned long addr, unsigned long *can_addr);
 bool is_module_percpu_address(unsigned long addr);
 bool is_module_text_address(unsigned long addr);
 
+static inline bool within_module_mem_type(unsigned long addr,
+					  const struct module *mod,
+					  enum mod_mem_type type)
+{
+	const struct module_memory *mod_mem;
+
+	if (WARN_ON_ONCE(type < MOD_MEM_TYPE_TEXT || type >= MOD_MEM_NUM_TYPES))
+		return false;
+
+	mod_mem = &mod->mod_mem[type];
+	return (unsigned long)mod_mem->base <= addr &&
+		addr < (unsigned long)mod_mem->base + mod_mem->size;
+}
+
 static inline bool within_module_core(unsigned long addr,
 				      const struct module *mod)
 {
-#ifdef CONFIG_ARCH_WANTS_MODULES_DATA_IN_VMALLOC
-	if ((unsigned long)mod->data_layout.base <= addr &&
-	    addr < (unsigned long)mod->data_layout.base + mod->data_layout.size)
-		return true;
-#endif
-	return (unsigned long)mod->core_layout.base <= addr &&
-	       addr < (unsigned long)mod->core_layout.base + mod->core_layout.size;
+	return within_module_mem_type(addr, mod, MOD_MEM_TYPE_TEXT) ||
+		within_module_mem_type(addr, mod, MOD_MEM_TYPE_DATA) ||
+		within_module_mem_type(addr, mod, MOD_MEM_TYPE_RODATA) ||
+		within_module_mem_type(addr, mod, MOD_MEM_TYPE_RO_AFTER_INIT);
 }
 
 static inline bool within_module_init(unsigned long addr,
 				      const struct module *mod)
 {
-	return (unsigned long)mod->init_layout.base <= addr &&
-	       addr < (unsigned long)mod->init_layout.base + mod->init_layout.size;
+	return within_module_mem_type(addr, mod, MOD_MEM_TYPE_INIT_TEXT) ||
+		within_module_mem_type(addr, mod, MOD_MEM_TYPE_INIT_DATA) ||
+		within_module_mem_type(addr, mod, MOD_MEM_TYPE_INIT_RODATA);
 }
 
 static inline bool within_module(unsigned long addr, const struct module *mod)
