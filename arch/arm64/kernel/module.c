@@ -22,29 +22,38 @@
 #include <asm/scs.h>
 #include <asm/sections.h>
 
-void *module_alloc(unsigned long size)
+static struct mod_type_allocator arm64_mod_type_allocator = {
+	.params = {
+		.flags		= MOD_ALLOC_KASAN_MODULE_SHADOW | MOD_ALLOC_KASAN_RESET_TAG,
+		.granularity	= PAGE_SIZE,
+		.alignment	= MODULE_ALIGN,
+	},
+};
+
+/* Note: kaslr_init() also calls this after updating module_alloc_base */
+void __init module_alloc_type_init(struct mod_allocators *allocators)
 {
-	u64 module_alloc_end = module_alloc_base + MODULES_VSIZE;
-	gfp_t gfp_mask = GFP_KERNEL;
-	void *p;
+	struct mod_alloc_params *params = &arm64_mod_type_allocator.params;
+	struct vmalloc_params *vmp = &params->vmp[0];
+	int i;
+
+	vmp->start = module_alloc_base;
+	vmp->end = module_alloc_base + MODULES_VSIZE;
+	vmp->gfp_mask = GFP_KERNEL;
+	vmp->pgprot = PAGE_KERNEL;
+	vmp->vm_flags = VM_DEFER_KMEMLEAK;
 
 	/* Silence the initial allocation */
 	if (IS_ENABLED(CONFIG_ARM64_MODULE_PLTS))
-		gfp_mask |= __GFP_NOWARN;
+		vmp->gfp_mask |= __GFP_NOWARN;
 
-	if (IS_ENABLED(CONFIG_KASAN_GENERIC) ||
-	    IS_ENABLED(CONFIG_KASAN_SW_TAGS))
+	if (IS_ENABLED(CONFIG_KASAN_GENERIC) || IS_ENABLED(CONFIG_KASAN_SW_TAGS))
 		/* don't exceed the static module region - see below */
-		module_alloc_end = MODULES_END;
+		vmp->end = MODULES_END;
 
-	p = __vmalloc_node_range(size, MODULE_ALIGN, module_alloc_base,
-				module_alloc_end, gfp_mask, PAGE_KERNEL, VM_DEFER_KMEMLEAK,
-				NUMA_NO_NODE, __builtin_return_address(0));
-
-	if (!p && IS_ENABLED(CONFIG_ARM64_MODULE_PLTS) &&
+	if (IS_ENABLED(CONFIG_ARM64_MODULE_PLTS) &&
 	    (IS_ENABLED(CONFIG_KASAN_VMALLOC) ||
-	     (!IS_ENABLED(CONFIG_KASAN_GENERIC) &&
-	      !IS_ENABLED(CONFIG_KASAN_SW_TAGS))))
+	     (!IS_ENABLED(CONFIG_KASAN_GENERIC) && !IS_ENABLED(CONFIG_KASAN_SW_TAGS)))) {
 		/*
 		 * KASAN without KASAN_VMALLOC can only deal with module
 		 * allocations being served from the reserved module region,
@@ -55,18 +64,17 @@ void *module_alloc(unsigned long size)
 		 * less likely that the module region gets exhausted, so we
 		 * can simply omit this fallback in that case.
 		 */
-		p = __vmalloc_node_range(size, MODULE_ALIGN, module_alloc_base,
-				module_alloc_base + SZ_2G, GFP_KERNEL,
-				PAGE_KERNEL, 0, NUMA_NO_NODE,
-				__builtin_return_address(0));
+		vmp = &params->vmp[1];
 
-	if (p && (kasan_alloc_module_shadow(p, size, gfp_mask) < 0)) {
-		vfree(p);
-		return NULL;
+		vmp->start = module_alloc_base;
+		vmp->end = module_alloc_base + SZ_2G;
+		vmp->gfp_mask = GFP_KERNEL;
+		vmp->pgprot = PAGE_KERNEL;
+		vmp->vm_flags = 0;
 	}
 
-	/* Memory is intended to be executable, reset the pointer tag. */
-	return kasan_reset_tag(p);
+	for (i = 0; i < MOD_MEM_NUM_TYPES; i++)
+		allocators->types[i] = &arm64_mod_type_allocator;
 }
 
 enum aarch64_reloc_op {

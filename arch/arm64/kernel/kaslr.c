@@ -12,6 +12,7 @@
 #include <linux/types.h>
 #include <linux/pgtable.h>
 #include <linux/random.h>
+#include <linux/module.h>
 
 #include <asm/fixmap.h>
 #include <asm/kernel-pgtable.h>
@@ -88,6 +89,8 @@ static int __init kaslr_init(void)
 	module_alloc_base += (module_range * (seed & ((1 << 21) - 1))) >> 21;
 	module_alloc_base &= PAGE_MASK;
 
+	/* module_alloc_base is updated, call moduleloader_init again */
+	moduleloader_init();
 	return 0;
 }
 subsys_initcall(kaslr_init)
