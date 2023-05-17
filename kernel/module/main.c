@@ -1210,19 +1210,21 @@ static bool mod_mem_use_vmalloc(enum mod_mem_type type)
 		mod_mem_type_is_core_data(type);
 }
 
-static void *module_memory_alloc(unsigned int size, enum mod_mem_type type)
+static void *module_memory_alloc(size_t size, enum mod_mem_type type)
 {
 	if (mod_mem_use_vmalloc(type))
 		return vzalloc(size);
-	return module_alloc(size);
+	return module_alloc_type(size, type);
 }
 
 static void module_memory_free(void *ptr, enum mod_mem_type type)
 {
-	if (mod_mem_use_vmalloc(type))
+	if (mod_mem_use_vmalloc(type)) {
 		vfree(ptr);
-	else
-		module_memfree(ptr);
+		return;
+	}
+
+	module_memfree_type(ptr, type);
 }
 
 static void free_mod_mem(struct module *mod)
@@ -1614,6 +1616,78 @@ void * __weak module_alloc(unsigned long size)
 	return __vmalloc_node_range(size, 1, VMALLOC_START, VMALLOC_END,
 			GFP_KERNEL, PAGE_KERNEL_EXEC, VM_FLUSH_RESET_PERMS,
 			NUMA_NO_NODE, __builtin_return_address(0));
+}
+
+static struct mod_allocators module_allocators;
+
+static struct mod_type_allocator default_mod_type_allocator = {
+	.params = {
+		.flags = MOD_ALLOC_FALLBACK,
+	},
+};
+
+void __init __weak module_alloc_type_init(struct mod_allocators *allocators)
+{
+	int i;
+
+	for (i = 0; i < MOD_MEM_NUM_TYPES; i++)
+		allocators->types[i] = &default_mod_type_allocator;
+}
+
+void *module_alloc_type(size_t size, enum mod_mem_type type)
+{
+	struct mod_type_allocator *allocator;
+	struct mod_alloc_params *params;
+	void *ptr = NULL;
+	int i;
+
+	if (WARN_ON_ONCE(type >= MOD_MEM_NUM_TYPES))
+		return NULL;
+
+	allocator = module_allocators.types[type];
+	params = &allocator->params;
+
+	if (params->flags & MOD_ALLOC_FALLBACK)
+		return module_alloc(size);
+
+	for (i = 0; i < MOD_MAX_ADDR_SPACES; i++) {
+		struct vmalloc_params *vmp = &params->vmp[i];
+
+		if (vmp->start == vmp->end)
+			continue;
+
+		ptr =  __vmalloc_node_range(size, params->alignment, vmp->start, vmp->end,
+					    vmp->gfp_mask, vmp->pgprot, vmp->vm_flags,
+					    NUMA_NO_NODE, __builtin_return_address(0));
+		if (!ptr)
+			continue;
+
+		if (params->flags & MOD_ALLOC_KASAN_MODULE_SHADOW) {
+			if (ptr && kasan_alloc_module_shadow(ptr, size, vmp->gfp_mask)) {
+				vfree(ptr);
+				return NULL;
+			}
+		}
+
+		if (params->flags & MOD_ALLOC_KASAN_RESET_TAG)
+			return kasan_reset_tag(ptr);
+		return ptr;
+	}
+	return NULL;
+}
+
+void module_memfree_type(void *ptr, enum mod_mem_type type)
+{
+	struct mod_type_allocator *allocator;
+	struct mod_alloc_params *params;
+
+	allocator = module_allocators.types[type];
+	params = &allocator->params;
+
+	if (params->free)
+		params->free(ptr);
+	else
+		module_memfree(ptr);
 }
 
 bool __weak module_init_section(const char *name)
@@ -2258,6 +2332,8 @@ static int move_module(struct module *mod, struct load_info *info)
 		void *dest;
 		Elf_Shdr *shdr = &info->sechdrs[i];
 		enum mod_mem_type type = shdr->sh_entsize >> SH_ENTSIZE_TYPE_SHIFT;
+		struct mod_type_allocator *allocator;
+		struct mod_alloc_params *params;
 
 		if (!(shdr->sh_flags & SHF_ALLOC))
 			continue;
@@ -2276,7 +2352,14 @@ static int move_module(struct module *mod, struct load_info *info)
 				ret = -ENOEXEC;
 				goto out_enomem;
 			}
-			memcpy(dest, (void *)shdr->sh_addr, shdr->sh_size);
+
+			allocator = module_allocators.types[type];
+			params = &allocator->params;
+
+			if (params->fill)
+				params->fill(dest, (void *)shdr->sh_addr, shdr->sh_size);
+			else
+				memcpy(dest, (void *)shdr->sh_addr, shdr->sh_size);
 		}
 		/*
 		 * Update the userspace copy's ELF section address to point to
@@ -2478,9 +2561,9 @@ static void do_free_init(struct work_struct *w)
 
 	llist_for_each_safe(pos, n, list) {
 		initfree = container_of(pos, struct mod_initfree, node);
-		module_memfree(initfree->init_text);
-		module_memfree(initfree->init_data);
-		module_memfree(initfree->init_rodata);
+		module_memfree_type(initfree->init_text, MOD_INIT_TEXT);
+		module_memfree_type(initfree->init_data, MOD_INIT_DATA);
+		module_memfree_type(initfree->init_rodata, MOD_INIT_RODATA);
 		kfree(initfree);
 	}
 }
@@ -3275,3 +3358,8 @@ static int module_debugfs_init(void)
 }
 module_init(module_debugfs_init);
 #endif
+
+void __init moduleloader_init(void)
+{
+	module_alloc_type_init(&module_allocators);
+}

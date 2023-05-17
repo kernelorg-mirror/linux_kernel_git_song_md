@@ -32,6 +32,65 @@ void *module_alloc(unsigned long size);
 /* Free memory returned from module_alloc. */
 void module_memfree(void *module_region);
 
+/* For mod_alloc_params.flags */
+enum mod_alloc_params_flags {
+	MOD_ALLOC_FALLBACK		= (1 << 0),	/* fallback to module_alloc() */
+	MOD_ALLOC_KASAN_MODULE_SHADOW	= (1 << 1),	/* calls kasan_alloc_module_shadow() */
+	MOD_ALLOC_KASAN_RESET_TAG	= (1 << 2),	/* calls kasan_reset_tag() */
+};
+
+#define MOD_MAX_ADDR_SPACES 2
+
+/**
+ * struct vmalloc_params - Parameters to call __vmalloc_node_range()
+ * @start:          Address space range start
+ * @end:            Address space range end
+ * @gfp_mask:       The gfp_t mask used for this range
+ * @pgprot:         The page protection for this range
+ * @vm_flags        The vm_flag used for this range
+ */
+struct vmalloc_params {
+	unsigned long	start;
+	unsigned long	end;
+	gfp_t		gfp_mask;
+	pgprot_t	pgprot;
+	unsigned long	vm_flags;
+};
+
+/**
+ * struct mod_alloc_params - Parameters for module allocation type
+ * @flags:          Properties in mod_alloc_params_flags
+ * @granularity:    The allocation granularity (PAGE/PMD) in bytes
+ * @alignment:      The allocation alignment requirement
+ * @vmp:            Parameters used to call vmalloc
+ * @fill:           Function to fill allocated space. If NULL, use memcpy()
+ * @free:           Function to free allocated space. If NULL, use module_memfree()
+ *
+ * If @granularity > @alignment the allocation can reuse free space in
+ * previously allocated pages. If they are the same, then fresh pages
+ * have to be allocated.
+ */
+struct mod_alloc_params {
+	unsigned int		flags;
+	unsigned int		granularity;
+	unsigned int		alignment;
+	struct vmalloc_params	vmp[MOD_MAX_ADDR_SPACES];
+	void			(*fill)(void *dst, void *src, size_t size);
+	void			(*free)(void *ptr);
+};
+
+struct mod_type_allocator {
+	struct mod_alloc_params	params;
+};
+
+struct mod_allocators {
+	struct mod_type_allocator *types[MOD_MEM_NUM_TYPES];
+};
+
+void *module_alloc_type(size_t size, enum mod_mem_type type);
+void module_memfree_type(void *ptr, enum mod_mem_type type);
+void module_alloc_type_init(struct mod_allocators *allocators);
+
 /* Determines if the section name is an init section (that is only used during
  * module loading).
  */

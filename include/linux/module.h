@@ -752,6 +752,8 @@ static inline bool is_livepatch_module(struct module *mod)
 
 void set_module_sig_enforced(void);
 
+void __init moduleloader_init(void);
+
 #else /* !CONFIG_MODULES... */
 
 static inline struct module *__module_address(unsigned long addr)
@@ -853,6 +855,17 @@ static inline
 void *dereference_module_function_descriptor(struct module *mod, void *ptr)
 {
 	return ptr;
+}
+
+enum mod_mem_type {
+	MOD_TEXT = 0,
+
+	MOD_MEM_NUM_TYPES,
+	MOD_INVALID = -1,
+};
+
+static inline void __init moduleloader_init(void)
+{
 }
 
 #endif /* CONFIG_MODULES */
