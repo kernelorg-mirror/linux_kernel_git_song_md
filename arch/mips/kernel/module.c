@@ -33,12 +33,30 @@ static LIST_HEAD(dbe_list);
 static DEFINE_SPINLOCK(dbe_lock);
 
 #ifdef MODULE_START
-void *module_alloc(unsigned long size)
+
+static struct mod_type_allocator mips_mod_type_allocator = {
+	.params = {
+		.flags		= MOD_ALLOC_KASAN_MODULE_SHADOW,
+		.granularity	= PAGE_SIZE,
+		.alignment	= 1,
+	},
+};
+
+void __init module_alloc_type_init(struct mod_allocators *allocators)
 {
-	return __vmalloc_node_range(size, 1, MODULE_START, MODULE_END,
-				GFP_KERNEL, PAGE_KERNEL, 0, NUMA_NO_NODE,
-				__builtin_return_address(0));
+	struct mod_alloc_params *params = &mips_mod_type_allocator.params;
+	struct vmalloc_params *vmp = &params->vmp[0];
+	int i;
+
+	vmp->start = MODULE_START;
+	vmp->end = MODULE_END;
+	vmp->gfp_mask = GFP_KERNEL;
+	vmp->pgprot = PAGE_KERNEL;
+
+	for (i = 0; i < MOD_MEM_NUM_TYPES; i++)
+		allocators->types[i] = &mips_mod_type_allocator;
 }
+
 #endif
 
 static void apply_r_mips_32(u32 *location, u32 base, Elf_Addr v)
