@@ -414,7 +414,7 @@ void *alloc_insn_page(void)
 {
 	void *page;
 
-	page = module_alloc(PAGE_SIZE);
+	page = module_alloc_type(PAGE_SIZE, MOD_TEXT);
 	if (!page)
 		return NULL;
 

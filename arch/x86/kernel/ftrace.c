@@ -265,11 +265,11 @@ void arch_ftrace_update_code(int command)
 /* Module allocation simplifies allocating memory for code */
 static inline void *alloc_tramp(unsigned long size)
 {
-	return module_alloc(size);
+	return module_alloc_type(size, MOD_TEXT);
 }
 static inline void tramp_free(void *tramp)
 {
-	module_memfree(tramp);
+	module_memfree_type(tramp, MOD_TEXT);
 }
 #else
 /* Trampolines can only be created if modules are supported */

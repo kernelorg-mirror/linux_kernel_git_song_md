@@ -65,26 +65,28 @@ static unsigned long int get_module_load_offset(void)
 }
 #endif
 
-void *module_alloc(unsigned long size)
+static struct mod_type_allocator x86_mod_type_allocator = {
+	.params = {
+		.flags		= MOD_ALLOC_KASAN_MODULE_SHADOW,
+		.granularity	= PAGE_SIZE,
+		.alignment	= MODULE_ALIGN,
+	},
+};
+
+void __init module_alloc_type_init(struct mod_allocators *allocators)
 {
-	gfp_t gfp_mask = GFP_KERNEL;
-	void *p;
+	struct mod_alloc_params *params = &x86_mod_type_allocator.params;
+	struct vmalloc_params *vmp = &params->vmp[0];
+	int i;
 
-	if (PAGE_ALIGN(size) > MODULES_LEN)
-		return NULL;
+	vmp->start = MODULES_VADDR + get_module_load_offset();
+	vmp->end = MODULES_END;
+	vmp->gfp_mask = GFP_KERNEL;
+	vmp->pgprot = PAGE_KERNEL_EXEC;
+	vmp->vm_flags= VM_FLUSH_RESET_PERMS | VM_DEFER_KMEMLEAK;
 
-	p = __vmalloc_node_range(size, MODULE_ALIGN,
-				 MODULES_VADDR + get_module_load_offset(),
-				 MODULES_END, gfp_mask, PAGE_KERNEL,
-				 VM_FLUSH_RESET_PERMS | VM_DEFER_KMEMLEAK,
-				 NUMA_NO_NODE, __builtin_return_address(0));
-
-	if (p && (kasan_alloc_module_shadow(p, size, gfp_mask) < 0)) {
-		vfree(p);
-		return NULL;
-	}
-
-	return p;
+	for (i = 0; i < MOD_MEM_NUM_TYPES; i++)
+		allocators->types[i] = &x86_mod_type_allocator;
 }
 
 #ifdef CONFIG_X86_32
