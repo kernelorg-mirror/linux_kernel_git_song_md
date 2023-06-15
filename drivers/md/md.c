@@ -7059,6 +7059,8 @@ static int set_bitmap_file(struct mddev *mddev, int fd)
 				mdname(mddev));
 			return -EINVAL;
 		}
+		pr_warn("%s: using deprecated bitmap file support\n",
+			mdname(mddev));
 
 		f = fget(fd);
 
