@@ -531,11 +531,9 @@ struct mddev {
 
 	/*
 	 * Temporarily store rdev that will be finally removed when
-	 * reconfig_mutex is unlocked.
+	 * reconfig_mutex is unlocked, protected by reconfig_mutex.
 	 */
 	struct list_head		deleting;
-	/* Protect the deleting list */
-	struct mutex			delete_mutex;
 
 	/* Used to synchronize idle and frozen for action_store() */
 	struct mutex			sync_mutex;
