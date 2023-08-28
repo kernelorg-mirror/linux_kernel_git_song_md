@@ -446,7 +446,7 @@ static void md_submit_bio(struct bio *bio)
  * Make sure no new requests are submitted to the device, and any requests that
  * have been submitted are completely handled.
  */
-void __mddev_suspend(struct mddev *mddev)
+void mddev_suspend(struct mddev *mddev)
 {
 
 	/*
@@ -480,9 +480,9 @@ void __mddev_suspend(struct mddev *mddev)
 
 	mutex_unlock(&mddev->suspend_mutex);
 }
-EXPORT_SYMBOL_GPL(__mddev_suspend);
+EXPORT_SYMBOL_GPL(mddev_suspend);
 
-void __mddev_resume(struct mddev *mddev)
+void mddev_resume(struct mddev *mddev)
 {
 	lockdep_assert_not_held(&mddev->reconfig_mutex);
 
@@ -493,7 +493,7 @@ void __mddev_resume(struct mddev *mddev)
 		return;
 	}
 
-	/* entred the memalloc scope from __mddev_suspend() */
+	/* entred the memalloc scope from mddev_suspend() */
 	memalloc_noio_restore(mddev->noio_flag);
 
 	percpu_ref_resurrect(&mddev->active_io);
@@ -505,7 +505,7 @@ void __mddev_resume(struct mddev *mddev)
 
 	mutex_unlock(&mddev->suspend_mutex);
 }
-EXPORT_SYMBOL_GPL(__mddev_resume);
+EXPORT_SYMBOL_GPL(mddev_resume);
 
 /*
  * Generic flush handling for md
@@ -3633,7 +3633,7 @@ rdev_attr_store(struct kobject *kobj, struct attribute *attr,
 		if (cmd_match(page, "remove") || cmd_match(page, "re-add") ||
 		    cmd_match(page, "writemostly") ||
 		    cmd_match(page, "-writemostly")) {
-			__mddev_suspend(mddev);
+			mddev_suspend(mddev);
 			suspended = true;
 		}
 	}
@@ -3647,7 +3647,7 @@ rdev_attr_store(struct kobject *kobj, struct attribute *attr,
 		mddev_unlock(mddev);
 
 		if (suspended)
-			__mddev_resume(mddev);
+			mddev_resume(mddev);
 	}
 
 	if (kn)
@@ -5221,9 +5221,9 @@ suspend_lo_store(struct mddev *mddev, const char *buf, size_t len)
 	if (new != (sector_t)new)
 		return -EINVAL;
 
-	__mddev_suspend(mddev);
+	mddev_suspend(mddev);
 	WRITE_ONCE(mddev->suspend_lo, new);
-	__mddev_resume(mddev);
+	mddev_resume(mddev);
 
 	return len;
 }
@@ -5249,9 +5249,9 @@ suspend_hi_store(struct mddev *mddev, const char *buf, size_t len)
 	if (new != (sector_t)new)
 		return -EINVAL;
 
-	__mddev_suspend(mddev);
+	mddev_suspend(mddev);
 	WRITE_ONCE(mddev->suspend_hi, new);
-	__mddev_resume(mddev);
+	mddev_resume(mddev);
 
 	return len;
 }
@@ -7815,7 +7815,7 @@ unlock:
 
 	mddev_unlock(mddev);
 	if (md_ioctl_need_suspend(cmd))
-		__mddev_resume(mddev);
+		mddev_resume(mddev);
 
 out:
 	if(did_set_md_closing)
@@ -9409,7 +9409,7 @@ static void md_start_sync(struct work_struct *ws)
 	bool suspended = false;
 
 	if (md_spares_need_change(mddev)) {
-		__mddev_suspend(mddev);
+		mddev_suspend(mddev);
 		suspended = true;
 	}
 
@@ -9451,7 +9451,7 @@ static void md_start_sync(struct work_struct *ws)
 
 	mddev_unlock(mddev);
 	if (suspended)
-		__mddev_resume(mddev);
+		mddev_resume(mddev);
 
 	md_wakeup_thread(mddev->sync_thread);
 	sysfs_notify_dirent_safe(mddev->sysfs_action);
@@ -9466,7 +9466,7 @@ not_running:
 	clear_bit(MD_RECOVERY_RUNNING, &mddev->recovery);
 	mddev_unlock(mddev);
 	if (suspended)
-		__mddev_resume(mddev);
+		mddev_resume(mddev);
 
 	wake_up(&resync_wait);
 	if (test_and_clear_bit(MD_RECOVERY_RECOVER, &mddev->recovery) &&
