@@ -9480,6 +9480,9 @@ static void unregister_sync_thread(struct mddev *mddev)
  */
 void md_check_recovery(struct mddev *mddev)
 {
+	if (READ_ONCE(mddev->suspended))
+		return;
+
 	if (mddev->bitmap)
 		md_bitmap_daemon_work(mddev);
 
